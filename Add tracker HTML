@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="cs">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Plnění úkolů KK</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      padding: 1rem;
+      background-color: #f4f4f4;
+      color: #333;
+    }
+    h1 {
+      text-align: center;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 2rem;
+    }
+    th, td {
+      padding: 10px;
+      text-align: center;
+      border-bottom: 1px solid #ccc;
+    }
+    th {
+      background-color: #007bff;
+      color: white;
+    }
+    .status {
+      font-weight: bold;
+    }
+  </style>
+</head>
+<body>
+  <h1>Aktuální plnění úkolů KK</h1>
+  <table>
+    <thead>
+      <tr>
+        <th>Úkol</th>
+        <th>Splněno</th>
+        <th>Cíl</th>
+        <th>Zbývá</th>
+        <th>% Plnění</th>
+      </tr>
+    </thead>
+    <tbody id="task-table"></tbody>
+  </table>
+
+  <script>
+    const SHEET_ID = '1zszV40Tp7V5484PI8_QpM-7S2vN8oxcNJXbG2XKegC4';
+    const SHEET_NAME = '2025';
+    const API_URL = `https://opensheet.elk.sh/${SHEET_ID}/${SHEET_NAME}`;
+
+    const TARGET_ROWS = {
+      12: 'FTTH KK (plnění norek)',
+      13: 'GA M. Hlas KK (plnění norek)',
+      14: 'GA / Prolongace (plnění tabulka)'
+    };
+
+    fetch(API_URL)
+      .then(response => response.json())
+      .then(data => {
+        const table = document.getElementById('task-table');
+        Object.keys(TARGET_ROWS).forEach(rowIndex => {
+          const row = data[rowIndex];
+          const rawValue = row['I'] || '';
+          const [done, goal] = rawValue.match(/(\d+)/g) || [0, 0];
+          const doneNum = parseInt(done);
+          const goalNum = parseInt(goal);
+          const remaining = goalNum - doneNum;
+          const percent = goalNum ? ((doneNum / goalNum) * 100).toFixed(1) + '%' : '-';
+
+          const tr = document.createElement('tr');
+          tr.innerHTML = `
+            <td>${TARGET_ROWS[rowIndex]}</td>
+            <td>${doneNum}</td>
+            <td>${goalNum}</td>
+            <td>${remaining}</td>
+            <td>${percent}</td>
+          `;
+          table.appendChild(tr);
+        });
+      })
+      .catch(error => {
+        document.getElementById('task-table').innerHTML = '<tr><td colspan="5">Chyba při načítání dat.</td></tr>';
+        console.error('Chyba při načítání dat:', error);
+      });
+  </script>
+</body>
+</html>
