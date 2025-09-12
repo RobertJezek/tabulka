@@ -1,0 +1,269 @@
+<!doctype html>
+<html lang="cs">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>3D konfigurátor nábytku</title>
+<style>
+  html,body{height:100%;margin:0;font-family:Arial,Helvetica,sans-serif}
+  #app{display:grid;grid-template-columns:320px 1fr;height:100%}
+  #panel{background:#f7f7f7;padding:12px;box-sizing:border-box;overflow:auto;border-right:1px solid #ddd}
+  label{display:block;margin-top:8px;font-size:13px}
+  input,textarea,select{width:100%;padding:6px;margin-top:4px;box-sizing:border-box}
+  button{margin-top:8px;padding:8px 10px;width:100%}
+  #scene{position:relative}
+  canvas{display:block}
+  #list{margin-top:12px}
+  .itemRow{display:flex;justify-content:space-between;align-items:center;padding:6px;background:#fff;border:1px solid #e7e7e7;margin-top:6px}
+  .small{font-size:12px;color:#555}
+  #notePopup{position:absolute;top:10px;left:10px;background:#fff;padding:6px 10px;border:1px solid #ccc;display:none;max-width:250px;font-size:13px}
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="panel">
+    <h3>3D konfigurátor (prototyp)</h3>
+    <div>
+      <strong>Místnost (cm)</strong>
+      <label>Šířka (x)</label><input id="roomWidth" type="number" value="400" />
+      <label>Hloubka (z)</label><input id="roomDepth" type="number" value="300" />
+      <label>Výška (y)</label><input id="roomHeight" type="number" value="260" />
+      <button id="createRoomBtn">Vytvořit místnost</button>
+    </div>
+
+    <hr/>
+
+    <div>
+      <strong>Přidat nábytek (cm)</strong>
+      <label>Název</label><input id="itemName" type="text" value="Skříň" />
+      <label>Šířka (x)</label><input id="itemW" type="number" value="80" />
+      <label>Hloubka (z)</label><input id="itemD" type="number" value="60" />
+      <label>Výška (y)</label><input id="itemH" type="number" value="200" />
+      <label>Barva</label>
+      <select id="itemColor">
+        <option value="#8d6e63">Dub</option>
+        <option value="#cfd8dc">Bílá</option>
+        <option value="#6d4c41">Tmavě hnědá</option>
+        <option value="#ffcc80">Světle hnědá</option>
+      </select>
+      <label>Poznámka</label>
+      <textarea id="itemNote" rows="2" placeholder="Např. posuvné dveře, bílý lak..."></textarea>
+      <button id="addItemBtn">Přidat nábytek</button>
+    </div>
+
+    <div id="list">
+      <strong>Prvky v místnosti</strong>
+      <div id="itemsContainer"></div>
+    </div>
+
+    <hr/>
+    <button id="exportJson">Uložit návrh (JSON)</button>
+    <input id="loadJson" type="file" accept=".json" />
+    <button id="screenshotBtn">Stáhnout obrázek (PNG)</button>
+    <p class="small">Ovládání 3D: myší otáčíš (pravý nebo kolečko), levé tlačítko vybírá a přetahuje.</p>
+  </div>
+
+  <div id="scene">
+    <div id="notePopup"></div>
+  </div>
+</div>
+
+<script type="module">
+import * as THREE from 'https://unpkg.com/three@0.152.2/build/three.module.js';
+import { OrbitControls } from 'https://unpkg.com/three@0.152.2/examples/jsm/controls/OrbitControls.js';
+
+// SCÉNA
+const container = document.getElementById('scene');
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0xf0f0f0);
+
+const camera = new THREE.PerspectiveCamera(60, container.clientWidth/container.clientHeight, 0.1, 2000);
+camera.position.set(5,4,6);
+
+const renderer = new THREE.WebGLRenderer({antialias:true});
+renderer.setSize(container.clientWidth, container.clientHeight);
+renderer.setPixelRatio(window.devicePixelRatio);
+container.appendChild(renderer.domElement);
+
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.target.set(0,1,0); controls.update();
+
+window.addEventListener('resize', ()=>{
+  camera.aspect = container.clientWidth/container.clientHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(container.clientWidth, container.clientHeight);
+});
+
+// světla
+scene.add(new THREE.AmbientLight(0xffffff,0.6));
+const dir = new THREE.DirectionalLight(0xffffff,0.6);
+dir.position.set(5,10,7);
+scene.add(dir);
+
+// proměnné
+let roomMesh=null;
+let room={width:4,depth:3,height:2.6};
+let items=[];
+const cm = v=>Number(v)/100;
+
+// vytvořit místnost
+function createRoom(w,d,h){
+  if(roomMesh) scene.remove(roomMesh);
+  room={width:w,depth:d,height:h};
+  const geom=new THREE.BoxGeometry(w,h,d);
+  const mat=new THREE.MeshStandardMaterial({color:0xffffff,side:THREE.BackSide});
+  roomMesh=new THREE.Mesh(geom,mat);
+  roomMesh.position.y=h/2;
+  scene.add(roomMesh);
+  camera.position.set(Math.max(w,d),h,Math.max(w,d));
+  controls.target.set(0,h/2,0); controls.update();
+}
+
+// přidat nábytek
+function addItem(name,w,d,h,color,note=""){
+  const geom=new THREE.BoxGeometry(w,h,d);
+  const mat=new THREE.MeshStandardMaterial({color,metalness:0.1,roughness:0.7});
+  const mesh=new THREE.Mesh(geom,mat);
+  mesh.position.set(0,h/2,0);
+  const id=Date.now().toString(36)+Math.floor(Math.random()*1000);
+  scene.add(mesh);
+  items.push({id,name,mesh,w,d,h,note});
+  refreshItemList();
+}
+
+// seznam
+function refreshItemList(){
+  const c=document.getElementById('itemsContainer');
+  c.innerHTML="";
+  items.forEach(it=>{
+    const div=document.createElement('div');
+    div.className='itemRow';
+    div.innerHTML=`<div>
+      <strong>${it.name}</strong><br/>
+      <span class="small">${Math.round(it.w*100)}×${Math.round(it.h*100)}×${Math.round(it.d*100)} cm</span><br/>
+      <span class="small">${it.note||""}</span>
+    </div>
+    <div>
+      <button data-id="${it.id}" class="selectBtn">Vybrat</button>
+      <button data-id="${it.id}" class="delBtn">Smazat</button>
+    </div>`;
+    c.appendChild(div);
+  });
+  document.querySelectorAll('.delBtn').forEach(b=>{
+    b.onclick=()=>removeItem(b.dataset.id);
+  });
+  document.querySelectorAll('.selectBtn').forEach(b=>{
+    b.onclick=()=>selectById(b.dataset.id);
+  });
+}
+function removeItem(id){
+  const idx=items.findIndex(x=>x.id===id);
+  if(idx>=0){
+    scene.remove(items[idx].mesh);
+    items.splice(idx,1);
+    clearSelection();
+    refreshItemList();
+  }
+}
+
+// výběr a poznámky
+let selected=null,selectedItemId=null;
+const notePopup=document.getElementById('notePopup');
+
+function selectById(id){
+  clearSelection();
+  const it=items.find(x=>x.id===id);
+  if(!it) return;
+  selected=it.mesh; selectedItemId=id;
+  selected.material.emissive=new THREE.Color(0x333333);
+  if(it.note){
+    notePopup.innerText=it.name+": "+it.note;
+    notePopup.style.display="block";
+  }
+}
+function clearSelection(){
+  if(selected){selected.material.emissive=new THREE.Color(0x000000);}
+  selected=null; selectedItemId=null;
+  notePopup.style.display="none";
+}
+
+// drag & drop
+let raycaster=new THREE.Raycaster(), pointer=new THREE.Vector2();
+let dragging=false;
+const plane=new THREE.Plane(new THREE.Vector3(0,1,0),0);
+
+renderer.domElement.addEventListener('pointerdown',ev=>{
+  const rect=renderer.domElement.getBoundingClientRect();
+  pointer.x=((ev.clientX-rect.left)/rect.width)*2-1;
+  pointer.y=-((ev.clientY-rect.top)/rect.height)*2+1;
+  raycaster.setFromCamera(pointer,camera);
+  const hits=raycaster.intersectObjects(items.map(i=>i.mesh));
+  if(hits.length>0){
+    selectById(items.find(i=>i.mesh===hits[0].object).id);
+    dragging=true; controls.enabled=false;
+  } else clearSelection();
+});
+window.addEventListener('pointermove',ev=>{
+  if(!dragging||!selected) return;
+  const rect=renderer.domElement.getBoundingClientRect();
+  pointer.x=((ev.clientX-rect.left)/rect.width)*2-1;
+  pointer.y=-((ev.clientY-rect.top)/rect.height)*2+1;
+  raycaster.setFromCamera(pointer,camera);
+  const p=raycaster.ray.intersectPlane(plane,new THREE.Vector3());
+  if(p){
+    const it=items.find(x=>x.id===selectedItemId);
+    const halfW=it.w/2, halfD=it.d/2;
+    const minX=-room.width/2+halfW, maxX=room.width/2-halfW;
+    const minZ=-room.depth/2+halfD, maxZ=room.depth/2-halfD;
+    selected.position.x=Math.min(maxX,Math.max(minX,p.x));
+    selected.position.z=Math.min(maxZ,Math.max(minZ,p.z));
+  }
+});
+window.addEventListener('pointerup',()=>{dragging=false;controls.enabled=true;});
+
+// animace
+function animate(){requestAnimationFrame(animate);renderer.render(scene,camera);} animate();
+
+// UI
+document.getElementById('createRoomBtn').onclick=()=>{
+  createRoom(cm(roomWidth.value),cm(roomDepth.value),cm(roomHeight.value));
+};
+document.getElementById('addItemBtn').onclick=()=>{
+  const n=itemName.value,w=cm(itemW.value),d=cm(itemD.value),h=cm(itemH.value);
+  const c=itemColor.value,note=itemNote.value;
+  addItem(n,w,d,h,c,note);
+};
+document.getElementById('screenshotBtn').onclick=()=>{
+  const url=renderer.domElement.toDataURL('image/png');
+  const a=document.createElement('a');a.href=url;a.download='navrh.png';a.click();
+};
+document.getElementById('exportJson').onclick=()=>{
+  const data={room:{w:room.width*100,d:room.depth*100,h:room.height*100},
+    items:items.map(it=>({id:it.id,name:it.name,w:it.w*100,d:it.d*100,h:it.h*100,
+      x:it.mesh.position.x*100,z:it.mesh.position.z*100,note:it.note}))};
+  const blob=new Blob([JSON.stringify(data,null,2)],{type:'application/json'});
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement('a');a.href=url;a.download='navrh.json';a.click();
+  URL.revokeObjectURL(url);
+};
+loadJson.onchange=ev=>{
+  const f=ev.target.files[0]; if(!f) return;
+  const r=new FileReader();
+  r.onload=e=>{
+    const obj=JSON.parse(e.target.result);
+    createRoom(cm(obj.room.w),cm(obj.room.d),cm(obj.room.h));
+    items.forEach(i=>scene.remove(i.mesh)); items=[];
+    (obj.items||[]).forEach(it=>{
+      addItem(it.name,cm(it.w),cm(it.d),cm(it.h),'#8d6e63',it.note);
+      items[items.length-1].mesh.position.set(cm(it.x),cm(it.h)/2,cm(it.z));
+    });
+    refreshItemList();
+  };
+  r.readAsText(f);
+};
+
+// výchozí místnost
+createRoom(room.width,room.depth,room.height);
+</script>
+</body>
+</html>
